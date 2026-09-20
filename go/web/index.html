@@ -15,15 +15,17 @@
         :root { background: #17181b; color: #f3f4f6; }
         .card, input, select { background: #22252a; border-color: #3a3f46; color: #f3f4f6; }
         .muted { color: #aeb5bf; }
+        .key-panel { background: #1c1e22; border-color: #3a3f46; }
       }
       body { margin: 0; padding: 24px; }
       main { max-width: 960px; margin: 0 auto; }
-      h1 { margin: 0 0 8px; font-size: 24px; }
-      h2 { margin: 0; font-size: 16px; }
+      h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; }
+      h2 { margin: 0; font-size: 16px; font-weight: 600; }
       p { line-height: 1.55; }
       .muted { color: #667085; font-size: 13px; }
-      .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 18px; margin-top: 16px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
-      .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 20px; margin-top: 16px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+      .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+      .actions { display: flex; gap: 8px; align-items: center; }
       .row-header { display: flex; gap: 10px; align-items: center; padding: 0 4px 6px; font-size: 12px; font-weight: 600; color: #667085; }
       .row-header .col-provider { flex: 0 0 25%; }
       .row-header .col-target { flex: 1; }
@@ -36,60 +38,63 @@
       .col-action { width: 54px; display: flex; justify-content: flex-end; }
       select, input { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #202124; font-size: 14px; outline: none; }
       select:focus, input:focus { border-color: #2563eb; }
-      button { border: 0; border-radius: 8px; padding: 9px 13px; cursor: pointer; font-size: 14px; }
+      button { border: 0; border-radius: 8px; padding: 9px 13px; cursor: pointer; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
       button.primary { background: #2563eb; color: #fff; }
+      button.primary:hover { background: #1d4ed8; }
       button.secondary { background: #e9eefb; color: #1d4ed8; }
+      button.secondary:hover { background: #dbe4fa; }
+      button.ghost { background: transparent; color: #667085; border: 1px solid #d0d5dd; }
+      button.ghost:hover { background: #f3f4f6; color: #111827; }
       button.danger { background: transparent; color: #b42318; padding-inline: 8px; }
       button.danger:hover { background: #fee4e2; }
       button:disabled { opacity: .55; cursor: wait; }
-      .label { font-size: 12px; color: #667085; margin-bottom: 6px; display: block; }
-      .auth { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
-      .status { min-height: 22px; margin-top: 12px; font-size: 13px; }
-      .status.error { color: #b42318; }
-      .status.ok { color: #067647; }
-      .empty { padding: 18px 0 6px; color: #667085; font-size: 14px; }
+      .status { min-height: 20px; margin-top: 14px; font-size: 13px; }
+      .status.error { color: #b42318; font-weight: 500; }
+      .status.ok { color: #067647; font-weight: 500; }
+      .empty { padding: 24px 0 12px; color: #667085; font-size: 14px; text-align: center; }
       .custom-input { margin-top: 4px; }
+      .key-panel { display: none; background: #f9fafb; border: 1px dashed #d0d5dd; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+      .key-panel.show { display: block; }
+      .key-panel-inner { display: flex; gap: 10px; align-items: center; }
+      .key-panel-inner input { max-width: 420px; }
       @media (max-width: 680px) {
         body { padding: 14px; }
-        .auth { grid-template-columns: 1fr; }
         .row-header { display: none; }
         .row { align-items: stretch; flex-wrap: wrap; border-bottom: 1px dashed #e4e7ec; padding-bottom: 12px; }
         .col-provider, .col-target, .col-alias { flex: 1 1 100%; }
         .col-action { width: 100%; justify-content: flex-end; }
+        .key-panel-inner { flex-direction: column; align-items: stretch; }
+        .key-panel-inner input { max-width: 100%; }
       }
     </style>
   </head>
   <body>
     <main>
       <h1>统一模型</h1>
-      <p class="muted">把客户端固定使用的模型名映射到 CLIProxyAPI 实际执行的模型。修改后立即生效，不需要修改客户端工具自身的配置。</p>
-
-      <section class="card">
-        <div class="toolbar">
-          <div>
-            <h2>管理密钥</h2>
-            <div class="muted">插件资源页本身不携带管理权限；如果没有自动读取到密钥，请在这里输入。</div>
-          </div>
-          <button class="secondary" id="load">读取配置</button>
-        </div>
-        <div class="auth">
-          <label>
-            <span class="label">Management key</span>
-            <input id="key" type="password" autocomplete="off" placeholder="可留空，优先尝试浏览器已保存的密钥" />
-          </label>
-          <button class="primary" id="save">保存映射</button>
-        </div>
-        <div id="status" class="status"></div>
-      </section>
+      <p class="muted">把客户端固定使用的模型名映射到 CLIProxyAPI 实际执行的模型。修改后立即生效，无需修改客户端配置。</p>
 
       <section class="card">
         <div class="toolbar">
           <div>
             <h2>模型映射</h2>
-            <div class="muted">先选择供应商，再选择可用模型名，输入客户端模型名即可。插件会自动读取已有的可用模型和供应商。</div>
+            <div class="muted">选择供应商和可用模型，输入客户端调用的别名即可。自动读取现有可用模型与供应商。</div>
           </div>
-          <button class="secondary" id="add">增加模型</button>
+          <div class="actions">
+            <button class="secondary" id="add">增加模型</button>
+            <button class="secondary" id="load">刷新</button>
+            <button class="primary" id="save">保存映射</button>
+            <button class="ghost" id="toggle-key" title="设置管理密钥（通常本地访问无需输入）">🔑</button>
+          </div>
         </div>
+
+        <div id="key-panel" class="key-panel">
+          <div class="key-panel-inner">
+            <input id="key" type="password" autocomplete="off" placeholder="Management Key（本地访问默认免密，可留空）" />
+            <button class="ghost" id="save-key-btn">确认</button>
+            <span class="muted" style="font-size: 12px;">本地访问（127.0.0.1）默认免密。若远程管理受限，可在此指定密钥。</span>
+          </div>
+        </div>
+
         <div id="row-header" class="row-header">
           <div class="col-provider">供应商 (Provider)</div>
           <div class="col-target">实际模型名 (Target Model)</div>
@@ -97,6 +102,7 @@
           <div class="col-action">操作</div>
         </div>
         <div id="rows"></div>
+        <div id="status" class="status"></div>
       </section>
     </main>
     <script>
@@ -106,6 +112,8 @@
       const rowHeader = document.getElementById('row-header');
       const status = document.getElementById('status');
       const keyInput = document.getElementById('key');
+      const keyPanel = document.getElementById('key-panel');
+      const toggleKeyBtn = document.getElementById('toggle-key');
       let mappings = [];
       let managementKey = '';
 
@@ -196,7 +204,6 @@
         try {
           const cfg = await request('/v0/management/config');
           if (cfg) {
-            // openai-compatibility entries
             if (Array.isArray(cfg['openai-compatibility'])) {
               for (const entry of cfg['openai-compatibility']) {
                 const p = (entry && entry.name || '').trim().toLowerCase();
@@ -211,7 +218,6 @@
                 }
               }
             }
-            // API key entries
             const keyProviders = ['codex', 'claude', 'gemini', 'xai', 'meta', 'vertex'];
             for (const kp of keyProviders) {
               const list = cfg[`${kp}-api-key`];
@@ -278,7 +284,7 @@
           }
         } catch (_) {}
 
-        // 4. For standard channels that are registered/configured, query static model definitions if models list is still empty
+        // 4. For standard channels, query static model definitions if models list is still empty
         for (const ch of standardProviders) {
           if (providerMap[ch] && providerMap[ch].size === 0) {
             try {
@@ -293,7 +299,7 @@
           }
         }
 
-        // 5. Merge existing mapping providers/targets so they are selectable
+        // 5. Merge existing mapping providers/targets
         for (const item of mappings) {
           const p = (item.provider || '').trim().toLowerCase();
           const t = (item.target || '').trim();
@@ -303,7 +309,6 @@
           }
         }
 
-        // Convert Sets to sorted Arrays
         const res = {};
         for (const [p, set] of Object.entries(providerMap)) {
           res[p] = Array.from(set).sort();
@@ -329,7 +334,7 @@
           rowHeader.style.display = 'none';
           const empty = document.createElement('div');
           empty.className = 'empty';
-          empty.textContent = '暂无模型映射，点击“增加模型”添加一个。';
+          empty.textContent = '暂无模型映射，点击上方“增加模型”添加。';
           rows.appendChild(empty);
           return;
         }
@@ -349,9 +354,7 @@
           providerSelect.title = '选择供应商';
 
           const curProvider = (mapping.provider || '').trim().toLowerCase();
-          let isCustomProvider = false;
 
-          // Placeholder option if empty
           if (!curProvider) {
             const emptyOpt = document.createElement('option');
             emptyOpt.value = '';
@@ -359,7 +362,6 @@
             providerSelect.appendChild(emptyOpt);
           }
 
-          // Populate discovered providers
           providers.forEach((p) => {
             const opt = document.createElement('option');
             opt.value = p;
@@ -367,7 +369,6 @@
             providerSelect.appendChild(opt);
           });
 
-          // If current provider is not in discovered list and not empty, append it
           if (curProvider && !providers.includes(curProvider)) {
             const curOpt = document.createElement('option');
             curOpt.value = curProvider;
@@ -375,7 +376,6 @@
             providerSelect.appendChild(curOpt);
           }
 
-          // Custom provider option
           const customProvOpt = document.createElement('option');
           customProvOpt.value = '__custom__';
           customProvOpt.textContent = '+ 自定义供应商...';
@@ -437,7 +437,6 @@
               });
             }
 
-            // Preserve current target if not in list
             if (preserveTarget && !models.includes(preserveTarget)) {
               const opt = document.createElement('option');
               opt.value = preserveTarget;
@@ -445,7 +444,6 @@
               targetSelect.appendChild(opt);
             }
 
-            // Custom model option
             const customOpt = document.createElement('option');
             customOpt.value = '__custom__';
             customOpt.textContent = '+ 自定义模型...';
@@ -493,7 +491,7 @@
           });
           actionCol.appendChild(remove);
 
-          // Events for Provider Select
+          // Events
           providerSelect.addEventListener('change', () => {
             const val = providerSelect.value;
             if (val === '__custom__') {
@@ -512,7 +510,6 @@
             populateTargetSelect(mapping.provider, mapping.target);
           });
 
-          // Events for Target Select
           targetSelect.addEventListener('change', () => {
             const val = targetSelect.value;
             if (val === '__custom__') {
@@ -552,10 +549,8 @@
             try { sessionStorage.setItem('unified-model-management-key', managementKey); } catch (_) {}
           }
 
-          // 1. Fetch available models and providers from CPA live API
           await fetchAvailableProvidersAndModels();
 
-          // 2. Fetch plugin config
           const config = await request(configURL);
           mappings = Array.isArray(config.mappings) ? config.mappings.map((item) => ({
             name: String(item.name || '').trim(),
@@ -563,7 +558,6 @@
             provider: String(item.provider || '').trim().toLowerCase(),
           })) : [];
 
-          // Re-merge loaded mappings with available models
           for (const item of mappings) {
             if (item.provider) {
               if (!availableMap[item.provider]) availableMap[item.provider] = [];
@@ -579,13 +573,10 @@
           setStatus(`已读取配置，发现 ${pCount} 个可用供应商。`, 'ok');
         } catch (error) {
           const message = String(error && error.message || error);
-          if (message.startsWith('401') && !keyInput.value) {
-            const entered = window.prompt('请输入 CLIProxyAPI Management key');
-            if (entered && entered.trim()) {
-              managementKey = entered.trim();
-              keyInput.value = managementKey;
-              return loadConfig();
-            }
+          if (message.startsWith('401')) {
+            keyPanel.classList.add('show');
+            setStatus('当前请求需要管理密钥（401 Unauthorized），请在展开的输入框中填写并点击确认。', 'error');
+            return;
           }
           setStatus(`读取失败：${message}`, 'error');
         } finally {
@@ -622,11 +613,32 @@
           render();
           setStatus('已保存，新的模型映射立即生效。', 'ok');
         } catch (error) {
-          setStatus(`保存失败：${String(error && error.message || error)}`, 'error');
+          const message = String(error && error.message || error);
+          if (message.startsWith('401')) {
+            keyPanel.classList.add('show');
+            setStatus('保存失败：需要管理密钥（401 Unauthorized），请在展开的输入框中填写密钥后重试。', 'error');
+            return;
+          }
+          setStatus(`保存失败：${message}`, 'error');
         } finally {
           button.disabled = false;
         }
       }
+
+      toggleKeyBtn.addEventListener('click', () => {
+        keyPanel.classList.toggle('show');
+        if (keyPanel.classList.contains('show')) {
+          keyInput.focus();
+        }
+      });
+
+      document.getElementById('save-key-btn').addEventListener('click', () => {
+        managementKey = keyInput.value.trim();
+        if (managementKey) {
+          try { sessionStorage.setItem('unified-model-management-key', managementKey); } catch (_) {}
+        }
+        loadConfig();
+      });
 
       document.getElementById('add').addEventListener('click', () => {
         const providers = getSortedProviders();
@@ -646,7 +658,11 @@
 
       document.getElementById('load').addEventListener('click', loadConfig);
       document.getElementById('save').addEventListener('click', saveConfig);
+
       managementKey = savedKey();
+      if (managementKey) {
+        keyInput.value = managementKey;
+      }
       render();
       loadConfig();
     </script>
