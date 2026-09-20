@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>统一模型</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f7f9;
+        color: #202124;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { background: #17181b; color: #f3f4f6; }
+        .card, input { background: #22252a; border-color: #3a3f46; }
+        input { color: #f3f4f6; }
+        .muted { color: #aeb5bf; }
+      }
+      body { margin: 0; padding: 24px; }
+      main { max-width: 920px; margin: 0 auto; }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      h2 { margin: 0; font-size: 16px; }
+      p { line-height: 1.55; }
+      .muted { color: #667085; font-size: 13px; }
+      .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 18px; margin-top: 16px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+      .toolbar, .row { display: flex; gap: 10px; align-items: center; }
+      .toolbar { justify-content: space-between; margin-bottom: 12px; }
+      .row { margin-top: 10px; }
+      .row input:first-child { flex: 0 0 25%; }
+      .row input:nth-child(2) { flex: 1; }
+      .row input:nth-child(3) { flex: 0 0 23%; }
+      input { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #202124; font-size: 14px; }
+      button { border: 0; border-radius: 8px; padding: 9px 13px; cursor: pointer; font-size: 14px; }
+      button.primary { background: #2563eb; color: #fff; }
+      button.secondary { background: #e9eefb; color: #1d4ed8; }
+      button.danger { background: transparent; color: #b42318; padding-inline: 8px; }
+      button:disabled { opacity: .55; cursor: wait; }
+      .label { font-size: 12px; color: #667085; margin-bottom: 6px; display: block; }
+      .auth { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+      .status { min-height: 22px; margin-top: 12px; font-size: 13px; }
+      .status.error { color: #b42318; }
+      .status.ok { color: #067647; }
+      .empty { padding: 18px 0 6px; color: #667085; font-size: 14px; }
+      @media (max-width: 620px) {
+        body { padding: 14px; }
+        .auth { grid-template-columns: 1fr; }
+        .row { align-items: stretch; flex-wrap: wrap; }
+        .row input:first-child, .row input:nth-child(2), .row input:nth-child(3) { flex: 1 1 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>统一模型</h1>
+      <p class="muted">把客户端固定使用的模型名映射到 CLIProxyAPI 实际执行的模型。修改后立即生效，不需要修改 CLI 工具自身的配置。</p>
+
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <h2>管理密钥</h2>
+            <div class="muted">插件资源页本身不携带管理权限；如果没有自动读取到密钥，请在这里输入。</div>
+          </div>
+          <button class="secondary" id="load">读取配置</button>
+        </div>
+        <div class="auth">
+          <label>
+            <span class="label">Management key</span>
+            <input id="key" type="password" autocomplete="off" placeholder="可留空，优先尝试浏览器已保存的密钥" />
+          </label>
+          <button class="primary" id="save">保存映射</button>
+        </div>
+        <div id="status" class="status"></div>
+      </section>
+
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <h2>模型映射</h2>
+            <div class="muted">填写 provider 后走宿主直达路由，只替换模型字段且不再嵌套转发；留空则使用兼容回退模式。</div>
+          </div>
+          <button class="secondary" id="add">增加模型</button>
+        </div>
+        <div id="rows"></div>
+      </section>
+    </main>
+    <script>
+      const pluginID = 'unified-model';
+      const configURL = `/v0/management/plugins/${pluginID}/config`;
+      const rows = document.getElementById('rows');
+      const status = document.getElementById('status');
+      const keyInput = document.getElementById('key');
+      let mappings = [];
+      let managementKey = '';
+
+      function setStatus(message, kind) {
+        status.textContent = message || '';
+        status.className = `status ${kind || ''}`;
+      }
+
+      function decodeStored(value) {
+        const prefix = 'enc::v1::';
+        if (!value || !value.startsWith(prefix)) return value || '';
+        try {
+          const encoded = atob(value.slice(prefix.length));
+          const key = new TextEncoder().encode(
+            `cli-proxy-api-webui::secure-storage|${location.host}|${navigator.userAgent}`
+          );
+          const bytes = new Uint8Array(encoded.length);
+          for (let i = 0; i < encoded.length; i++) {
+            bytes[i] = encoded.charCodeAt(i) ^ key[i % key.length];
+          }
+          return new TextDecoder().decode(bytes);
+        } catch (_) {
+          return '';
+        }
+      }
+
+      function savedKey() {
+        try {
+          const auth = JSON.parse(decodeStored(localStorage.getItem('cli-proxy-auth') || ''));
+          if (auth && typeof auth.managementKey === 'string' && auth.managementKey.trim()) {
+            return auth.managementKey.trim();
+          }
+        } catch (_) {}
+        try {
+          const legacy = decodeStored(localStorage.getItem('managementKey') || '').trim();
+          if (legacy) return legacy;
+        } catch (_) {}
+        try {
+          return sessionStorage.getItem('unified-model-management-key') || '';
+        } catch (_) {
+          return '';
+        }
+      }
+
+      function authHeaders() {
+        const key = (keyInput.value || managementKey || '').trim();
+        return key ? { Authorization: `Bearer ${key}` } : {};
+      }
+
+      async function request(method, body) {
+        const response = await fetch(configURL, {
+          method,
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`${response.status} ${text || response.statusText}`);
+        }
+        return response.status === 204 ? {} : response.json();
+      }
+
+      function render() {
+        rows.replaceChildren();
+        if (!mappings.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = '暂无模型映射，点击“增加模型”添加一个。';
+          rows.appendChild(empty);
+          return;
+        }
+        mappings.forEach((mapping, index) => {
+          const row = document.createElement('div');
+          row.className = 'row';
+          const alias = document.createElement('input');
+          alias.placeholder = '客户端模型名，例如 Port';
+          alias.value = mapping.name || '';
+          alias.addEventListener('input', () => { mappings[index].name = alias.value; });
+          const target = document.createElement('input');
+          target.placeholder = '实际模型名，例如 gpt-5.5 或 claude-sonnet-4';
+          target.value = mapping.target || '';
+          target.addEventListener('input', () => { mappings[index].target = target.value; });
+          const provider = document.createElement('input');
+          provider.placeholder = 'provider（可选）例如 codex';
+          provider.value = mapping.provider || '';
+          provider.addEventListener('input', () => { mappings[index].provider = provider.value; });
+          const remove = document.createElement('button');
+          remove.className = 'danger';
+          remove.textContent = '删除';
+          remove.addEventListener('click', () => { mappings.splice(index, 1); render(); });
+          row.append(alias, target, provider, remove);
+          rows.appendChild(row);
+        });
+      }
+
+      async function loadConfig() {
+        const button = document.getElementById('load');
+        button.disabled = true;
+        setStatus('正在读取配置…');
+        try {
+          if (!managementKey) managementKey = (keyInput.value || savedKey()).trim();
+          if (managementKey) {
+            try { sessionStorage.setItem('unified-model-management-key', managementKey); } catch (_) {}
+          }
+          const config = await request('GET');
+          mappings = Array.isArray(config.mappings) ? config.mappings.map((item) => ({
+            name: String(item.name || '').trim(), target: String(item.target || '').trim(),
+            provider: String(item.provider || '').trim().toLowerCase(),
+          })) : [];
+          render();
+          setStatus('配置已读取。', 'ok');
+        } catch (error) {
+          const message = String(error && error.message || error);
+          if (message.startsWith('401') && !keyInput.value) {
+            const entered = window.prompt('请输入 CLIProxyAPI Management key');
+            if (entered && entered.trim()) {
+              managementKey = entered.trim();
+              keyInput.value = managementKey;
+              return loadConfig();
+            }
+          }
+          setStatus(`读取失败：${message}`, 'error');
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function saveConfig() {
+        const button = document.getElementById('save');
+        const normalized = mappings.map((item) => ({
+          name: String(item.name || '').trim(),
+          target: String(item.target || '').trim(),
+          provider: String(item.provider || '').trim().toLowerCase(),
+        }));
+        if (normalized.some((item) => !item.name || !item.target)) {
+          setStatus('每一行都需要填写客户端模型名和实际模型名。', 'error');
+          return;
+        }
+        const names = new Set();
+        for (const item of normalized) {
+          const name = item.name.toLowerCase();
+          if (names.has(name)) {
+            setStatus('客户端模型名不能重复。', 'error');
+            return;
+          }
+          names.add(name);
+        }
+        button.disabled = true;
+        setStatus('正在保存…');
+        try {
+          if (!managementKey) managementKey = (keyInput.value || savedKey()).trim();
+          await request('PATCH', { mappings: normalized });
+          mappings = normalized;
+          render();
+          setStatus('已保存，新的模型映射立即生效。', 'ok');
+        } catch (error) {
+          setStatus(`保存失败：${String(error && error.message || error)}`, 'error');
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      document.getElementById('add').addEventListener('click', () => {
+        mappings.push({ name: mappings.length ? '' : 'Port', target: '', provider: '' });
+        render();
+      });
+      document.getElementById('load').addEventListener('click', loadConfig);
+      document.getElementById('save').addEventListener('click', saveConfig);
+      managementKey = savedKey();
+      render();
+      loadConfig();
+    </script>
+  </body>
+</html>
