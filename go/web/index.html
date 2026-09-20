@@ -13,28 +13,34 @@
       }
       @media (prefers-color-scheme: dark) {
         :root { background: #17181b; color: #f3f4f6; }
-        .card, input { background: #22252a; border-color: #3a3f46; }
-        input { color: #f3f4f6; }
+        .card, input, select { background: #22252a; border-color: #3a3f46; color: #f3f4f6; }
         .muted { color: #aeb5bf; }
       }
       body { margin: 0; padding: 24px; }
-      main { max-width: 920px; margin: 0 auto; }
+      main { max-width: 960px; margin: 0 auto; }
       h1 { margin: 0 0 8px; font-size: 24px; }
       h2 { margin: 0; font-size: 16px; }
       p { line-height: 1.55; }
       .muted { color: #667085; font-size: 13px; }
       .card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 18px; margin-top: 16px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
-      .toolbar, .row { display: flex; gap: 10px; align-items: center; }
-      .toolbar { justify-content: space-between; margin-bottom: 12px; }
-      .row { margin-top: 10px; }
-      .row input:first-child { flex: 0 0 25%; }
-      .row input:nth-child(2) { flex: 1; }
-      .row input:nth-child(3) { flex: 0 0 23%; }
-      input { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #202124; font-size: 14px; }
+      .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .row-header { display: flex; gap: 10px; align-items: center; padding: 0 4px 6px; font-size: 12px; font-weight: 600; color: #667085; }
+      .row-header .col-provider { flex: 0 0 25%; }
+      .row-header .col-target { flex: 1; }
+      .row-header .col-alias { flex: 0 0 26%; }
+      .row-header .col-action { width: 54px; text-align: center; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+      .col-provider { flex: 0 0 25%; display: flex; flex-direction: column; gap: 4px; }
+      .col-target { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+      .col-alias { flex: 0 0 26%; display: flex; flex-direction: column; gap: 4px; }
+      .col-action { width: 54px; display: flex; justify-content: flex-end; }
+      select, input { box-sizing: border-box; width: 100%; padding: 10px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #202124; font-size: 14px; outline: none; }
+      select:focus, input:focus { border-color: #2563eb; }
       button { border: 0; border-radius: 8px; padding: 9px 13px; cursor: pointer; font-size: 14px; }
       button.primary { background: #2563eb; color: #fff; }
       button.secondary { background: #e9eefb; color: #1d4ed8; }
       button.danger { background: transparent; color: #b42318; padding-inline: 8px; }
+      button.danger:hover { background: #fee4e2; }
       button:disabled { opacity: .55; cursor: wait; }
       .label { font-size: 12px; color: #667085; margin-bottom: 6px; display: block; }
       .auth { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
@@ -42,18 +48,21 @@
       .status.error { color: #b42318; }
       .status.ok { color: #067647; }
       .empty { padding: 18px 0 6px; color: #667085; font-size: 14px; }
-      @media (max-width: 620px) {
+      .custom-input { margin-top: 4px; }
+      @media (max-width: 680px) {
         body { padding: 14px; }
         .auth { grid-template-columns: 1fr; }
-        .row { align-items: stretch; flex-wrap: wrap; }
-        .row input:first-child, .row input:nth-child(2), .row input:nth-child(3) { flex: 1 1 100%; }
+        .row-header { display: none; }
+        .row { align-items: stretch; flex-wrap: wrap; border-bottom: 1px dashed #e4e7ec; padding-bottom: 12px; }
+        .col-provider, .col-target, .col-alias { flex: 1 1 100%; }
+        .col-action { width: 100%; justify-content: flex-end; }
       }
     </style>
   </head>
   <body>
     <main>
       <h1>统一模型</h1>
-      <p class="muted">把客户端固定使用的模型名映射到 CLIProxyAPI 实际执行的模型。修改后立即生效，不需要修改 CLI 工具自身的配置。</p>
+      <p class="muted">把客户端固定使用的模型名映射到 CLIProxyAPI 实际执行的模型。修改后立即生效，不需要修改客户端工具自身的配置。</p>
 
       <section class="card">
         <div class="toolbar">
@@ -77,9 +86,15 @@
         <div class="toolbar">
           <div>
             <h2>模型映射</h2>
-            <div class="muted">填写 provider 后走宿主直达路由，只替换模型字段且不再嵌套转发；留空则使用兼容回退模式。</div>
+            <div class="muted">先选择供应商，再选择可用模型名，输入客户端模型名即可。插件会自动读取已有的可用模型和供应商。</div>
           </div>
           <button class="secondary" id="add">增加模型</button>
+        </div>
+        <div id="row-header" class="row-header">
+          <div class="col-provider">供应商 (Provider)</div>
+          <div class="col-target">实际模型名 (Target Model)</div>
+          <div class="col-alias">客户端模型名 (Client Alias)</div>
+          <div class="col-action">操作</div>
         </div>
         <div id="rows"></div>
       </section>
@@ -88,10 +103,15 @@
       const pluginID = 'unified-model';
       const configURL = `/v0/management/plugins/${pluginID}/config`;
       const rows = document.getElementById('rows');
+      const rowHeader = document.getElementById('row-header');
       const status = document.getElementById('status');
       const keyInput = document.getElementById('key');
       let mappings = [];
       let managementKey = '';
+
+      // Discovered providers: { [providerName]: [model1, model2, ...] }
+      let availableMap = {};
+      const standardProviders = ['codex', 'claude', 'gemini', 'antigravity', 'xai', 'meta', 'kimi', 'devin', 'vertex'];
 
       function setStatus(message, kind) {
         status.textContent = message || '';
@@ -139,8 +159,8 @@
         return key ? { Authorization: `Bearer ${key}` } : {};
       }
 
-      async function request(method, body) {
-        const response = await fetch(configURL, {
+      async function request(url, method = 'GET', body = undefined) {
+        const response = await fetch(url, {
           method,
           headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: body === undefined ? undefined : JSON.stringify(body),
@@ -152,35 +172,372 @@
         return response.status === 204 ? {} : response.json();
       }
 
+      async function fetchAvailableProvidersAndModels() {
+        const providerMap = {};
+
+        function addModel(provider, model) {
+          if (!provider || !model) return;
+          const p = String(provider).trim().toLowerCase();
+          const m = String(model).trim();
+          if (!p || !m || m.toLowerCase() === 'port' || p === 'unified-model') return;
+          if (!providerMap[p]) providerMap[p] = new Set();
+          providerMap[p].add(m);
+        }
+
+        function ensureProvider(provider) {
+          if (!provider) return;
+          const p = String(provider).trim().toLowerCase();
+          if (p && p !== 'unified-model' && !providerMap[p]) {
+            providerMap[p] = new Set();
+          }
+        }
+
+        // 1. Fetch /v0/management/config
+        try {
+          const cfg = await request('/v0/management/config');
+          if (cfg) {
+            // openai-compatibility entries
+            if (Array.isArray(cfg['openai-compatibility'])) {
+              for (const entry of cfg['openai-compatibility']) {
+                const p = (entry && entry.name || '').trim().toLowerCase();
+                if (p) {
+                  ensureProvider(p);
+                  if (Array.isArray(entry.models)) {
+                    for (const m of entry.models) {
+                      const name = (typeof m === 'string' ? m : (m && (m.name || m.id)) || '').trim();
+                      if (name) addModel(p, name);
+                    }
+                  }
+                }
+              }
+            }
+            // API key entries
+            const keyProviders = ['codex', 'claude', 'gemini', 'xai', 'meta', 'vertex'];
+            for (const kp of keyProviders) {
+              const list = cfg[`${kp}-api-key`];
+              if (Array.isArray(list) && list.length > 0) {
+                ensureProvider(kp);
+                for (const item of list) {
+                  if (Array.isArray(item.models)) {
+                    for (const m of item.models) {
+                      const name = (typeof m === 'string' ? m : (m && (m.name || m.id)) || '').trim();
+                      if (name) addModel(kp, name);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        // 2. Fetch /v0/management/auth-files
+        try {
+          const afData = await request('/v0/management/auth-files');
+          if (afData && Array.isArray(afData.files)) {
+            for (const f of afData.files) {
+              const p = (f && f.type || '').trim().toLowerCase();
+              if (p) {
+                ensureProvider(p);
+                if (f.name) {
+                  try {
+                    const mData = await request(`/v0/management/auth-files/models?name=${encodeURIComponent(f.name)}`);
+                    if (mData && Array.isArray(mData.models)) {
+                      for (const m of mData.models) {
+                        const name = (m && (m.id || m.name) || '').trim();
+                        if (name) addModel(p, name);
+                      }
+                    }
+                  } catch (_) {}
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        // 3. Fetch /v1/models
+        try {
+          const v1Data = await request('/v1/models');
+          if (v1Data && Array.isArray(v1Data.data)) {
+            for (const item of v1Data.data) {
+              const id = (item && item.id || '').trim();
+              let ownedBy = (item && item.owned_by || '').trim().toLowerCase();
+              if (!id || id === 'Port' || ownedBy === 'unified-model') continue;
+
+              if (ownedBy === 'openai' && providerMap['codex']) {
+                ownedBy = 'codex';
+              } else if (ownedBy === 'anthropic' && providerMap['claude']) {
+                ownedBy = 'claude';
+              } else if (ownedBy === 'google' && providerMap['gemini']) {
+                ownedBy = 'gemini';
+              }
+
+              if (ownedBy) {
+                addModel(ownedBy, id);
+              }
+            }
+          }
+        } catch (_) {}
+
+        // 4. For standard channels that are registered/configured, query static model definitions if models list is still empty
+        for (const ch of standardProviders) {
+          if (providerMap[ch] && providerMap[ch].size === 0) {
+            try {
+              const chData = await request(`/v0/management/model-definitions/${ch}`);
+              if (chData && Array.isArray(chData.models)) {
+                for (const m of chData.models) {
+                  const name = (m && (m.id || m.name) || '').trim();
+                  if (name) addModel(ch, name);
+                }
+              }
+            } catch (_) {}
+          }
+        }
+
+        // 5. Merge existing mapping providers/targets so they are selectable
+        for (const item of mappings) {
+          const p = (item.provider || '').trim().toLowerCase();
+          const t = (item.target || '').trim();
+          if (p) {
+            ensureProvider(p);
+            if (t) addModel(p, t);
+          }
+        }
+
+        // Convert Sets to sorted Arrays
+        const res = {};
+        for (const [p, set] of Object.entries(providerMap)) {
+          res[p] = Array.from(set).sort();
+        }
+        availableMap = res;
+        return res;
+      }
+
+      function getSortedProviders() {
+        const discovered = Object.keys(availableMap);
+        discovered.sort((a, b) => a.localeCompare(b));
+        return discovered;
+      }
+
+      function getModelsForProvider(provider) {
+        const p = (provider || '').trim().toLowerCase();
+        return (availableMap[p] || []).slice();
+      }
+
       function render() {
         rows.replaceChildren();
         if (!mappings.length) {
+          rowHeader.style.display = 'none';
           const empty = document.createElement('div');
           empty.className = 'empty';
           empty.textContent = '暂无模型映射，点击“增加模型”添加一个。';
           rows.appendChild(empty);
           return;
         }
+        rowHeader.style.display = 'flex';
+
+        const providers = getSortedProviders();
+
         mappings.forEach((mapping, index) => {
           const row = document.createElement('div');
           row.className = 'row';
-          const alias = document.createElement('input');
-          alias.placeholder = '客户端模型名，例如 Port';
-          alias.value = mapping.name || '';
-          alias.addEventListener('input', () => { mappings[index].name = alias.value; });
-          const target = document.createElement('input');
-          target.placeholder = '实际模型名，例如 gpt-5.5 或 claude-sonnet-4';
-          target.value = mapping.target || '';
-          target.addEventListener('input', () => { mappings[index].target = target.value; });
-          const provider = document.createElement('input');
-          provider.placeholder = 'provider（可选）例如 codex';
-          provider.value = mapping.provider || '';
-          provider.addEventListener('input', () => { mappings[index].provider = provider.value; });
+
+          // 1. Provider Column
+          const providerCol = document.createElement('div');
+          providerCol.className = 'col-provider';
+
+          const providerSelect = document.createElement('select');
+          providerSelect.title = '选择供应商';
+
+          const curProvider = (mapping.provider || '').trim().toLowerCase();
+          let isCustomProvider = false;
+
+          // Placeholder option if empty
+          if (!curProvider) {
+            const emptyOpt = document.createElement('option');
+            emptyOpt.value = '';
+            emptyOpt.textContent = '-- 请选择供应商 --';
+            providerSelect.appendChild(emptyOpt);
+          }
+
+          // Populate discovered providers
+          providers.forEach((p) => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            providerSelect.appendChild(opt);
+          });
+
+          // If current provider is not in discovered list and not empty, append it
+          if (curProvider && !providers.includes(curProvider)) {
+            const curOpt = document.createElement('option');
+            curOpt.value = curProvider;
+            curOpt.textContent = curProvider;
+            providerSelect.appendChild(curOpt);
+          }
+
+          // Custom provider option
+          const customProvOpt = document.createElement('option');
+          customProvOpt.value = '__custom__';
+          customProvOpt.textContent = '+ 自定义供应商...';
+          providerSelect.appendChild(customProvOpt);
+
+          if (curProvider) {
+            providerSelect.value = curProvider;
+          } else if (providers.length > 0) {
+            providerSelect.value = providers[0];
+            mapping.provider = providers[0];
+          }
+
+          const customProvInput = document.createElement('input');
+          customProvInput.className = 'custom-input';
+          customProvInput.placeholder = '输入自定义供应商名称';
+          customProvInput.style.display = 'none';
+          customProvInput.value = curProvider;
+
+          providerCol.append(providerSelect, customProvInput);
+
+          // 2. Target Model Column
+          const targetCol = document.createElement('div');
+          targetCol.className = 'col-target';
+
+          const targetSelect = document.createElement('select');
+          targetSelect.title = '选择实际模型';
+
+          const customTargetInput = document.createElement('input');
+          customTargetInput.className = 'custom-input';
+          customTargetInput.placeholder = '输入实际模型名，例如 gpt-5.5';
+          customTargetInput.style.display = 'none';
+          customTargetInput.value = mapping.target || '';
+
+          function populateTargetSelect(selectedProvider, preserveTarget = '') {
+            targetSelect.replaceChildren();
+            const models = getModelsForProvider(selectedProvider);
+
+            if (!selectedProvider) {
+              const opt = document.createElement('option');
+              opt.value = '';
+              opt.textContent = '-- 请先选择供应商 --';
+              targetSelect.appendChild(opt);
+              targetSelect.disabled = true;
+              return;
+            }
+            targetSelect.disabled = false;
+
+            if (models.length === 0) {
+              const opt = document.createElement('option');
+              opt.value = '';
+              opt.textContent = '-- 暂无已发现模型 --';
+              targetSelect.appendChild(opt);
+            } else {
+              models.forEach((m) => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                targetSelect.appendChild(opt);
+              });
+            }
+
+            // Preserve current target if not in list
+            if (preserveTarget && !models.includes(preserveTarget)) {
+              const opt = document.createElement('option');
+              opt.value = preserveTarget;
+              opt.textContent = preserveTarget;
+              targetSelect.appendChild(opt);
+            }
+
+            // Custom model option
+            const customOpt = document.createElement('option');
+            customOpt.value = '__custom__';
+            customOpt.textContent = '+ 自定义模型...';
+            targetSelect.appendChild(customOpt);
+
+            if (preserveTarget) {
+              targetSelect.value = preserveTarget;
+            } else if (models.length > 0) {
+              targetSelect.value = models[0];
+              mapping.target = models[0];
+              if (!mapping.name) {
+                mapping.name = models[0];
+                aliasInput.value = models[0];
+              }
+            } else {
+              targetSelect.value = '__custom__';
+              customTargetInput.style.display = 'block';
+            }
+          }
+
+          populateTargetSelect(mapping.provider, mapping.target || '');
+          targetCol.append(targetSelect, customTargetInput);
+
+          // 3. Client Model Alias Column
+          const aliasCol = document.createElement('div');
+          aliasCol.className = 'col-alias';
+          const aliasInput = document.createElement('input');
+          aliasInput.placeholder = '客户端模型名，例如 Port';
+          aliasInput.value = mapping.name || '';
+          aliasInput.addEventListener('input', () => {
+            mappings[index].name = aliasInput.value;
+          });
+          aliasCol.appendChild(aliasInput);
+
+          // 4. Action Column
+          const actionCol = document.createElement('div');
+          actionCol.className = 'col-action';
           const remove = document.createElement('button');
           remove.className = 'danger';
           remove.textContent = '删除';
-          remove.addEventListener('click', () => { mappings.splice(index, 1); render(); });
-          row.append(alias, target, provider, remove);
+          remove.title = '删除此映射';
+          remove.addEventListener('click', () => {
+            mappings.splice(index, 1);
+            render();
+          });
+          actionCol.appendChild(remove);
+
+          // Events for Provider Select
+          providerSelect.addEventListener('change', () => {
+            const val = providerSelect.value;
+            if (val === '__custom__') {
+              customProvInput.style.display = 'block';
+              customProvInput.focus();
+              mapping.provider = customProvInput.value.trim().toLowerCase();
+            } else {
+              customProvInput.style.display = 'none';
+              mapping.provider = val.trim().toLowerCase();
+            }
+            populateTargetSelect(mapping.provider, '');
+          });
+
+          customProvInput.addEventListener('input', () => {
+            mapping.provider = customProvInput.value.trim().toLowerCase();
+            populateTargetSelect(mapping.provider, mapping.target);
+          });
+
+          // Events for Target Select
+          targetSelect.addEventListener('change', () => {
+            const val = targetSelect.value;
+            if (val === '__custom__') {
+              customTargetInput.style.display = 'block';
+              customTargetInput.focus();
+              mapping.target = customTargetInput.value.trim();
+            } else {
+              customTargetInput.style.display = 'none';
+              mapping.target = val.trim();
+              if (!aliasInput.value) {
+                aliasInput.value = mapping.target;
+                mapping.name = mapping.target;
+              }
+            }
+          });
+
+          customTargetInput.addEventListener('input', () => {
+            mapping.target = customTargetInput.value.trim();
+            if (!aliasInput.value) {
+              aliasInput.value = mapping.target;
+              mapping.name = mapping.target;
+            }
+          });
+
+          row.append(providerCol, targetCol, aliasCol, actionCol);
           rows.appendChild(row);
         });
       }
@@ -188,19 +545,38 @@
       async function loadConfig() {
         const button = document.getElementById('load');
         button.disabled = true;
-        setStatus('正在读取配置…');
+        setStatus('正在读取可用模型和插件配置…');
         try {
           if (!managementKey) managementKey = (keyInput.value || savedKey()).trim();
           if (managementKey) {
             try { sessionStorage.setItem('unified-model-management-key', managementKey); } catch (_) {}
           }
-          const config = await request('GET');
+
+          // 1. Fetch available models and providers from CPA live API
+          await fetchAvailableProvidersAndModels();
+
+          // 2. Fetch plugin config
+          const config = await request(configURL);
           mappings = Array.isArray(config.mappings) ? config.mappings.map((item) => ({
-            name: String(item.name || '').trim(), target: String(item.target || '').trim(),
+            name: String(item.name || '').trim(),
+            target: String(item.target || '').trim(),
             provider: String(item.provider || '').trim().toLowerCase(),
           })) : [];
+
+          // Re-merge loaded mappings with available models
+          for (const item of mappings) {
+            if (item.provider) {
+              if (!availableMap[item.provider]) availableMap[item.provider] = [];
+              if (item.target && !availableMap[item.provider].includes(item.target)) {
+                availableMap[item.provider].push(item.target);
+                availableMap[item.provider].sort();
+              }
+            }
+          }
+
           render();
-          setStatus('配置已读取。', 'ok');
+          const pCount = Object.keys(availableMap).length;
+          setStatus(`已读取配置，发现 ${pCount} 个可用供应商。`, 'ok');
         } catch (error) {
           const message = String(error && error.message || error);
           if (message.startsWith('401') && !keyInput.value) {
@@ -225,14 +601,14 @@
           provider: String(item.provider || '').trim().toLowerCase(),
         }));
         if (normalized.some((item) => !item.name || !item.target)) {
-          setStatus('每一行都需要填写客户端模型名和实际模型名。', 'error');
+          setStatus('每一行都需要选择/填写供应商、实际模型名以及客户端模型名。', 'error');
           return;
         }
         const names = new Set();
         for (const item of normalized) {
           const name = item.name.toLowerCase();
           if (names.has(name)) {
-            setStatus('客户端模型名不能重复。', 'error');
+            setStatus(`客户端模型名不能重复：${item.name}`, 'error');
             return;
           }
           names.add(name);
@@ -241,7 +617,7 @@
         setStatus('正在保存…');
         try {
           if (!managementKey) managementKey = (keyInput.value || savedKey()).trim();
-          await request('PATCH', { mappings: normalized });
+          await request(configURL, 'PATCH', { mappings: normalized });
           mappings = normalized;
           render();
           setStatus('已保存，新的模型映射立即生效。', 'ok');
@@ -253,9 +629,21 @@
       }
 
       document.getElementById('add').addEventListener('click', () => {
-        mappings.push({ name: mappings.length ? '' : 'Port', target: '', provider: '' });
+        const providers = getSortedProviders();
+        let defaultProv = '';
+        let defaultTgt = '';
+        if (providers.length > 0) {
+          defaultProv = providers[0];
+          const models = getModelsForProvider(defaultProv);
+          if (models.length > 0) {
+            defaultTgt = models[0];
+          }
+        }
+        const defaultName = mappings.length === 0 ? 'Port' : (defaultTgt || '');
+        mappings.push({ name: defaultName, provider: defaultProv, target: defaultTgt });
         render();
       });
+
       document.getElementById('load').addEventListener('click', loadConfig);
       document.getElementById('save').addEventListener('click', saveConfig);
       managementKey = savedKey();
