@@ -4,8 +4,10 @@
 *.dll
 *.h
 bin/
+dist/
 
 # OS / Editor
 .DS_Store
 .vscode/
 .idea/
+*.swp

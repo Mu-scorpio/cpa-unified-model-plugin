@@ -73,6 +73,12 @@ var managementPage []byte
 
 const resourcePath = "/status"
 
+// catalogQueryParam asks the resource page for the built-in model catalog instead of HTML.
+const catalogQueryParam = "view"
+
+// catalogQueryParamValue selects the built-in model name -> context window table.
+const catalogQueryParamValue = "catalog"
+
 var mappings = newMappingStore()
 
 type envelope struct {
@@ -105,6 +111,7 @@ type registrationCapability struct {
 	ExecutorInputFormats  []string                     `json:"executor_input_formats,omitempty"`
 	ExecutorOutputFormats []string                     `json:"executor_output_formats,omitempty"`
 	RequestInterceptor    bool                         `json:"request_interceptor"`
+	ResponseInterceptor   bool                         `json:"response_interceptor"`
 	ManagementAPI         bool                         `json:"management_api"`
 }
 
@@ -119,6 +126,11 @@ type rpcModelRouteRequest struct {
 
 type rpcRequestInterceptRequest struct {
 	pluginapi.RequestInterceptRequest
+	HostCallbackID string `json:"host_callback_id,omitempty"`
+}
+
+type rpcResponseInterceptRequest struct {
+	pluginapi.ResponseInterceptRequest
 	HostCallbackID string `json:"host_callback_id,omitempty"`
 }
 
@@ -235,12 +247,14 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodModelRegister:
 		return okEnvelope(pluginapi.ModelRegistrationResponse{
 			Provider: providerID,
-			Models:   modelInfos(mappings.snapshot()),
+			Models:   modelInfos(mappings.snapshot(), mappings.snapshotContextLengths()),
 		})
 	case pluginabi.MethodModelRoute:
 		return handleModelRoute(request)
 	case pluginabi.MethodRequestInterceptBefore, pluginabi.MethodRequestInterceptAfter:
 		return handleRequestIntercept(request)
+	case pluginabi.MethodResponseInterceptAfter:
+		return handleResponseIntercept(request)
 	case pluginabi.MethodExecutorIdentifier:
 		return okEnvelope(identifierResponse{Identifier: providerID})
 	case pluginabi.MethodExecutorExecute:
@@ -278,14 +292,42 @@ func pluginRegistration() registration {
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
 			Name:             "统一模型",
-			Version:          "0.1.0",
+			Version:          "0.4.1",
 			Author:           "CLIProxyAPI",
 			GitHubRepository: "https://github.com/router-for-me/CLIProxyAPI",
-			ConfigFields: []pluginapi.ConfigField{{
-				Name:        "mappings",
-				Type:        pluginapi.ConfigFieldTypeArray,
-				Description: "Client-visible model aliases, target model IDs, and optional built-in provider keys. Setting provider enables direct routing without a nested plugin execution callback.",
-			}},
+			ConfigFields: []pluginapi.ConfigField{
+				{
+					Name:        "mappings",
+					Type:        pluginapi.ConfigFieldTypeArray,
+					Description: "Client-visible model aliases, target model IDs, and optional built-in provider keys. Setting provider enables direct routing without a nested plugin execution callback.",
+				},
+				{
+					Name:        "mappings[].auth",
+					Type:        pluginapi.ConfigFieldTypeString,
+					Description: "Optional credential ID (auth file name) that pins execution to one credential of the provider. Pinned mappings run through the plugin executor with a forced provider and auth ID; leave empty for native provider routing.",
+				},
+				{
+					Name:        "mappings[].context-length",
+					Type:        pluginapi.ConfigFieldTypeInteger,
+					Description: "Context window, in tokens, advertised to clients for the alias. Omitted or non-positive values fall back to the context length table and finally to 128000.",
+				},
+				{
+					Name:        "context-lengths",
+					Type:        pluginapi.ConfigFieldTypeObject,
+					Description: "Overrides for the built-in model name -> context window table, keyed by model name or family, for example {gpt-5.5: 300000}. Used whenever an alias has no explicit context-length.",
+				},
+				{
+					Name:        "mappings[].modalities",
+					Type:        pluginapi.ConfigFieldTypeArray,
+					EnumValues:  append([]string(nil), supportedModalities...),
+					Description: "Input modalities advertised to clients for the alias. Defaults to [text] when omitted.",
+				},
+				{
+					Name:        "enhanced-mode",
+					Type:        pluginapi.ConfigFieldTypeBoolean,
+					Description: "When true, client-facing model listings (OpenAI, Claude, Gemini, Codex client, Grok) only include plugin aliases. Native CPA models stay registered for routing but are hidden from clients.",
+				},
+			},
 		},
 		Capabilities: registrationCapability{
 			ModelRegistrar:        true,
@@ -295,6 +337,7 @@ func pluginRegistration() registration {
 			ExecutorInputFormats:  []string{"chat-completions"},
 			ExecutorOutputFormats: []string{"chat-completions"},
 			RequestInterceptor:    true,
+			ResponseInterceptor:   true,
 			ManagementAPI:         true,
 		},
 	}
@@ -311,6 +354,15 @@ func handleModelRoute(raw []byte) ([]byte, error) {
 				Handled:    true,
 				TargetKind: pluginapi.ModelRouteTargetSelf,
 				Reason:     "unified-model alias has no target configured",
+			})
+		}
+		// A pinned credential must run through the plugin executor: the direct provider
+		// route cannot carry an auth pin and would round-robin every credential.
+		if mapping.pinnedAuthID() != "" {
+			return okEnvelope(pluginapi.ModelRouteResponse{
+				Handled:    true,
+				TargetKind: pluginapi.ModelRouteTargetSelf,
+				Reason:     "credential pinned by unified-model",
 			})
 		}
 		if provider := strings.ToLower(strings.TrimSpace(mapping.Provider)); provider != "" && containsProvider(req.AvailableProviders, provider) {
@@ -353,6 +405,28 @@ func handleRequestIntercept(raw []byte) ([]byte, error) {
 	return okEnvelope(pluginapi.RequestInterceptResponse{Body: body})
 }
 
+func handleResponseIntercept(raw []byte) ([]byte, error) {
+	if !mappings.snapshotEnhancedMode() {
+		return okEnvelope(pluginapi.ResponseInterceptResponse{})
+	}
+	var req rpcResponseInterceptRequest
+	if len(raw) > 0 {
+		if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
+			return nil, fmt.Errorf("decode response interceptor request: %w", errUnmarshal)
+		}
+	}
+	// Model listings are the only responses that carry an empty requested model and a catalog body.
+	if strings.TrimSpace(req.RequestedModel) != "" || strings.TrimSpace(req.Model) != "" || req.Stream || len(req.Body) == 0 {
+		return okEnvelope(pluginapi.ResponseInterceptResponse{})
+	}
+	aliases := aliasNameSet(mappings.snapshot())
+	body, changed := filterClientModelListing(req.Body, aliases)
+	if !changed {
+		return okEnvelope(pluginapi.ResponseInterceptResponse{})
+	}
+	return okEnvelope(pluginapi.ResponseInterceptResponse{Body: body})
+}
+
 func containsProvider(providers []string, wanted string) bool {
 	wanted = strings.ToLower(strings.TrimSpace(wanted))
 	if wanted == "" {
@@ -371,23 +445,11 @@ func handleExecutorExecute(raw []byte) ([]byte, error) {
 	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
 		return nil, fmt.Errorf("decode executor request: %w", errUnmarshal)
 	}
-	target, errTarget := mappedTarget(req.Model)
+	mapping, errTarget := resolveExecution(req.Model)
 	if errTarget != nil {
 		return nil, errTarget
 	}
-	hostRequest := hostModelExecutionRequest{
-		HostModelExecutionRequest: pluginapi.HostModelExecutionRequest{
-			EntryProtocol: req.SourceFormat,
-			ExitProtocol:  req.Format,
-			Model:         target,
-			Stream:        false,
-			Body:          rewriteRequestBody(req.Payload, target, false),
-			Headers:       req.Headers,
-			Query:         req.Query,
-			Alt:           req.Alt,
-		},
-		HostCallbackID: req.HostCallbackID,
-	}
+	hostRequest := hostModelRequestFromExecutor(req, mapping, false)
 	result, errCall := callHost(pluginabi.MethodHostModelExecute, hostRequest)
 	if errCall != nil {
 		return nil, errCall
@@ -407,23 +469,11 @@ func handleExecutorExecuteStream(raw []byte) ([]byte, error) {
 	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
 		return nil, fmt.Errorf("decode executor stream request: %w", errUnmarshal)
 	}
-	target, errTarget := mappedTarget(req.Model)
+	mapping, errTarget := resolveExecution(req.Model)
 	if errTarget != nil {
 		return nil, errTarget
 	}
-	hostRequest := hostModelExecutionRequest{
-		HostModelExecutionRequest: pluginapi.HostModelExecutionRequest{
-			EntryProtocol: req.SourceFormat,
-			ExitProtocol:  req.Format,
-			Model:         target,
-			Stream:        true,
-			Body:          rewriteRequestBody(req.Payload, target, true),
-			Headers:       req.Headers,
-			Query:         req.Query,
-			Alt:           req.Alt,
-		},
-		HostCallbackID: req.HostCallbackID,
-	}
+	hostRequest := hostModelRequestFromExecutor(req, mapping, true)
 	result, errCall := callHost(pluginabi.MethodHostModelExecuteStream, hostRequest)
 	if errCall != nil {
 		return nil, errCall
@@ -453,7 +503,7 @@ func handleExecutorCountTokens(raw []byte) ([]byte, error) {
 	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
 		return nil, fmt.Errorf("decode token count request: %w", errUnmarshal)
 	}
-	if _, errTarget := mappedTarget(req.Model); errTarget != nil {
+	if _, errTarget := resolveExecution(req.Model); errTarget != nil {
 		return nil, errTarget
 	}
 	payload, errMarshal := json.Marshal(map[string]int{"total_tokens": estimateTokens(req.Payload)})
@@ -463,15 +513,37 @@ func handleExecutorCountTokens(raw []byte) ([]byte, error) {
 	return okEnvelope(pluginapi.ExecutorResponse{Payload: payload})
 }
 
-func mappedTarget(model string) (string, error) {
-	target, matched := mappings.resolve(model)
+// resolveExecution returns the mapping a model alias resolves to, with a valid target.
+func resolveExecution(model string) (modelMapping, error) {
+	mapping, matched := mappings.resolveMapping(model)
 	if !matched {
-		return "", fmt.Errorf("model %q is not registered by unified-model", model)
+		return modelMapping{}, fmt.Errorf("model %q is not registered by unified-model", model)
 	}
-	if strings.TrimSpace(target) == "" {
-		return "", fmt.Errorf("model %q has no target model configured", model)
+	if strings.TrimSpace(mapping.Target) == "" {
+		return modelMapping{}, fmt.Errorf("model %q has no target model configured", model)
 	}
-	return target, nil
+	return mapping, nil
+}
+
+// hostModelRequestFromExecutor builds the host model execution request for a resolved
+// mapping. A pinned credential forces its provider and auth ID so the host selects
+// exactly that credential; unpinned mappings leave both empty for native routing.
+func hostModelRequestFromExecutor(req rpcExecutorRequest, mapping modelMapping, stream bool) hostModelExecutionRequest {
+	return hostModelExecutionRequest{
+		HostModelExecutionRequest: pluginapi.HostModelExecutionRequest{
+			EntryProtocol:  req.SourceFormat,
+			ExitProtocol:   req.Format,
+			Model:          mapping.Target,
+			Stream:         stream,
+			Body:           rewriteRequestBody(req.Payload, mapping.Target, stream),
+			Headers:        req.Headers,
+			Query:          req.Query,
+			Alt:            req.Alt,
+			ForcedProvider: mapping.forcedProvider(),
+			AuthID:         mapping.pinnedAuthID(),
+		},
+		HostCallbackID: req.HostCallbackID,
+	}
 }
 
 func handleManagement(raw []byte) ([]byte, error) {
@@ -481,11 +553,35 @@ func handleManagement(raw []byte) ([]byte, error) {
 			return nil, fmt.Errorf("decode management request: %w", errUnmarshal)
 		}
 	}
+	if catalogRequested(req) {
+		body, errMarshal := json.Marshal(modelCatalog(mappings.snapshotContextLengths()))
+		if errMarshal != nil {
+			return nil, errMarshal
+		}
+		return okEnvelope(managementResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       body,
+		})
+	}
 	return okEnvelope(managementResponse{
 		StatusCode: http.StatusOK,
 		Headers:    http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
 		Body:       managementPage,
 	})
+}
+
+// catalogRequested reports whether the request asks for the built-in model catalog JSON.
+func catalogRequested(req managementRequest) bool {
+	if req.Method != "" && !strings.EqualFold(strings.TrimSpace(req.Method), http.MethodGet) {
+		return false
+	}
+	for _, value := range req.Query[catalogQueryParam] {
+		if strings.EqualFold(strings.TrimSpace(value), catalogQueryParamValue) {
+			return true
+		}
+	}
+	return false
 }
 
 func readHostStream(streamID string) (pluginapi.HostModelStreamReadResponse, error) {
